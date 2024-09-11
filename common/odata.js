@@ -134,3 +134,57 @@ function processData(message) {
 
     return message;
 }
+
+/**
+ * 用 Content Modifier 设置如下日期格式化的配置信息：
+ * 
+ * - dates: CreationDate,LastChangeDateTime,PurchaseOrderDate
+ * - time-zone: 8
+ * 
+ */
+function processDates(message) {
+    //Body
+    // var body = message.getBody(java.lang.String);
+    var body = JSON.parse(message.getBody(java.lang.String));
+    //Properties
+    var properties = message.getProperties();
+        
+    var dateFields = properties.get("dates").split(",");
+    var timeZone = properties.get("time-zone");
+    
+    body.d.results.forEach((item) => {
+        dateFields.forEach((field) => {
+            item[field] = formatODataDate(item[field], timeZone && parseInt(timeZone))
+        })
+    })
+
+    // 将处理后的 JSON 对象转换回字符串并写回消息体
+    message.setBody(JSON.stringify(body));
+    
+    return message
+}
+
+/**
+ * 将 OData 日期格式转换为 yyyy-MM-dd HH:mm:ss
+ */
+function formatODataDate(odataDate, zone) {
+    zone = zone || 0
+    // 正则匹配 "/Date(数字)/" 格式
+    var match = odataDate.match(/\/Date\((\d+)([+-]\d+)?\)\//);
+    if (match) {
+        var timestamp = parseInt(match[1], 10);  // 提取时间戳
+        var date = new Date(timestamp + zone * 60 * 60 * 1000);  // 转换为日期对象 e.g. UTC+8
+        
+        // 格式化为 yyyy-MM-dd
+        var year = date.getUTCFullYear();
+        var month = ('0' + (date.getUTCMonth() + 1)).slice(-2);  // 月份从0开始
+        var day = ('0' + date.getUTCDate()).slice(-2);
+
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        
+        return year + '-' + month + '-' + day + ' ' + hours + ':' + minutes + ':' + seconds;
+    }
+    return odataDate;  // 如果不匹配，返回原始数据
+}
