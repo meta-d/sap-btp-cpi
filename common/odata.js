@@ -15,6 +15,8 @@ function processData(message) {
     var reqHttpUrl = headers.get("CamelHttpUrl");
     var reqHttpMethod = headers.get("CamelHttpMethod");
     var reqHttpPath = headers.get("CamelHttpPath");
+    // Get the query parameters from the request
+    var reqQueryParams = headers.get("CamelHttpQuery");
 
     //Properties
     var properties = message.getProperties();
@@ -28,7 +30,7 @@ function processData(message) {
     const messageLog= messageLogFactory.getMessageLog(message);
     if (messageLog != null) {
         messageLog.setStringProperty("JS Logger", "Logger");
-        messageLog.addAttachmentAsString("JavaScript Message Body", reqHttpPath + '\n' + reqHttpMethod + ': ' + reqHttpUrl + '\n' + odataUrl + '\n' +  body, "text/plain");
+        messageLog.addAttachmentAsString("JavaScript Message Body", reqHttpPath + '?' + reqQueryParams + '\n' + reqHttpMethod + ': ' + reqHttpUrl + '\n' + odataUrl + '\n' +  body, "text/plain");
     }
     
     // 导入 Java 类
@@ -51,7 +53,11 @@ function processData(message) {
     var odataServicePath = "/sap/opu/odata/sap/" + odataName + "/"
     
     if (reqHttpMethod == 'GET') {
-        var httpGet = new HttpGet(odataUrl + odataServicePath + reqHttpPath );
+        var httpGetUrl = odataUrl + odataServicePath + reqHttpPath
+        if (reqQueryParams) {
+            httpGetUrl = httpGetUrl + '?' + reqQueryParams
+        }
+        var httpGet = new HttpGet(httpGetUrl);
         httpGet.setHeader("Authorization", authHeader);
         httpGet.setHeader("Accept", "application/json");
         var response = client.execute(httpGet);
