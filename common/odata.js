@@ -5,12 +5,17 @@ If you want to know more about the SCRIPT APIs, refer the link below
 https://help.sap.com/doc/a56f52e1a58e4e2bac7f7adbf45b2e26/Cloud/en-US/index.html */
 importClass(com.sap.gateway.ip.core.customdev.util.Message);
 importClass(java.util.HashMap);
+importClass(com.sap.it.api.ITApiFactory);
+importClass(com.sap.it.api.securestore.SecureStoreService);
+
 
 /**
  * 用 Content Modifier 设置如下配置信息：
  * 
  * - url: Base url for SAP S4H Cloud system
  * - odata: OData service name
+ * - credential: Account in Security Material
+ *   or:
  * - username: SAP Username
  * - password: SAP User password
  * 
@@ -55,10 +60,15 @@ function processData(message) {
     // 创建 HttpClient 实例
     var client = HttpClient.createDefault();
     
-     // 设置 Basic Authentication 头
-    var authHeader = "Basic " + java.util.Base64.getEncoder().encodeToString(
-        new java.lang.String(username + ":" + password).getBytes("utf-8")
-    );
+    // 设置 Basic Authentication 头
+    var authHeader = '';
+    if (properties.get("credential")) {
+        authHeader = getBasicCredential(properties.get("credential"), message);
+    } else {
+        authHeader = "Basic " + java.util.Base64.getEncoder().encodeToString(
+            new java.lang.String(username + ":" + password).getBytes("utf-8")
+        );
+    }
     
     var odataServicePath = "/sap/opu/odata/sap/" + odataName + "/"
     
@@ -69,21 +79,40 @@ function processData(message) {
         }
         var httpGet = new HttpGet(new URI(httpGetUrl));
         httpGet.setHeader("Authorization", authHeader);
-        httpGet.setHeader("Accept", "application/json");
-        var response = client.execute(httpGet);
-        var entity = response.getEntity();
-        // 读取响应内容
-        if (entity !== null) {
-            var inputStream = entity.getContent();
-            var responseString = IOUtils.toString(inputStream, "UTF-8");
-            inputStream.close();
-        
-            // 处理或打印响应
-            message.setBody(responseString);
-            // 设置响应头的 Content-Type 为 application/json
-            message.setHeader("Content-Type", "application/json");
+
+        if (reqHttpPath == '$metadata') {
+            var response = client.execute(httpGet);
+            var entity = response.getEntity();
+            // 读取响应内容
+            if (entity !== null) {
+                var inputStream = entity.getContent();
+                var responseString = IOUtils.toString(inputStream, "UTF-8");
+                inputStream.close();
             
-            messageLog.addAttachmentAsString("Response GET Body", responseString, "text/plain");
+                // 处理或打印响应
+                message.setBody(responseString);
+                // 设置响应头的 Content-Type 为 application/json
+                message.setHeader("Content-Type", "application/xml");
+                
+                messageLog.addAttachmentAsString("Metadata", responseString, "text/plain");
+            }
+        } else {
+            httpGet.setHeader("Accept", "application/json");
+            var response = client.execute(httpGet);
+            var entity = response.getEntity();
+            // 读取响应内容
+            if (entity !== null) {
+                var inputStream = entity.getContent();
+                var responseString = IOUtils.toString(inputStream, "UTF-8");
+                inputStream.close();
+            
+                // 处理或打印响应
+                message.setBody(responseString);
+                // 设置响应头的 Content-Type 为 application/json
+                message.setHeader("Content-Type", "application/json");
+                
+                messageLog.addAttachmentAsString("Response GET Body", responseString, "text/plain");
+            }
         }
     }
     
@@ -298,4 +327,23 @@ function processPostSubTable(message) {
     message.setBody(JSON.stringify(body));
         
     return message
+}
+
+function getBasicCredential(name, message) {
+    // 获取 SecureStoreService 实例
+    var secureStoreService = ITApiFactory.getService(SecureStoreService, null);
+    // 获取 Security Material 中的 User Credentials (假设存储名称为 'MyCredentials')
+    var credential = secureStoreService.getUserCredential(name);
+
+    if (credential) {
+        // 提取用户名和密码
+        var username = credential.getUsername();
+        var password = new java.lang.String(credential.getPassword());
+
+        return "Basic " + java.util.Base64.getEncoder().encodeToString(
+            new java.lang.String(username + ":" + password).getBytes("utf-8")
+        );
+    } else {
+        throw new Error(`Not Credential for ` + name)
+    }
 }
