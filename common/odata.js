@@ -315,6 +315,8 @@ function processPostSubTable(message) {
                 acc[key] = {
                     results: [value]
                 }
+            } else {
+                acc[key] = value;
             }
         } else {
             acc[key] = value;

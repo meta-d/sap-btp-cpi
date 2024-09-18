@@ -60,6 +60,10 @@ function dateToTimestamp(message) {
   return message;
 }
 
+/**
+ * - primaryKey:
+ * - keys:
+ */
 function toPatchMethod(message) {
   var body = message.getBody(java.lang.String);
   
@@ -72,10 +76,20 @@ function toPatchMethod(message) {
   var properties = message.getProperties();
 
   if (reqHttpMethod == 'POST' && body) {
-    var key = properties.get("key");
+    var key = properties.get("primaryKey");
+    var keys = properties.get("keys");
     body = JSON.parse(body)
     if (body[key]) {
-      reqHttpPath = reqHttpPath + `('${body[key]}')`;
+      if (keys) {
+        keys = keys.split(',');
+        reqHttpPath = reqHttpPath + `(` + keys.map((key) => {
+          key = key.trim();
+          return `${key}='${body[key] || ''}'`
+        }).join(',') + `)`;
+      } else {
+        reqHttpPath = reqHttpPath + `('${body[key]}')`;
+      }
+      
       headers.put("CamelHttpPath", reqHttpPath);
       headers.put("CamelHttpMethod", 'PATCH');
     }
@@ -229,4 +243,145 @@ function isPrimitiveString(value) {
 
 function isStringObject(value) {
   return value instanceof java.lang.String;
+}
+
+/**
+ * 有的情况外围系统仅支持使用对象方式传递 to_ Navigation 的值， 约定 navigation name 增加 `_n` 后缀并转换为数组。
+ */
+function processCreateNavigation(message) {
+  //Headers
+  var headers = message.getHeaders();
+  var reqHttpMethod = headers.get("CamelHttpMethod");
+  if (reqHttpMethod == 'GET' || !message.getBody(java.lang.String)) {
+      return message
+  }
+  //Body
+  var body = JSON.parse(message.getBody(java.lang.String));
+  body = Object.keys(body).reduce((acc, key) => {
+      const value = body[key]
+      if (key.startsWith('to_')) {
+          if (Array.isArray(body[key])) {
+              acc[key] = {
+                  results: value
+              }
+          } else if (key.endsWith('_n')) {
+              key = key.split('_n')[0]
+              acc[key] = {
+                  results: [value]
+              }
+          } else {
+              acc[key] = value;
+          }
+      } else {
+          acc[key] = value;
+      }
+      
+      return acc
+  }, {})
+
+  // 将处理后的 JSON 对象转换回字符串并写回消息体
+  message.setBody(JSON.stringify(body));
+      
+  return message
+}
+
+/**
+ * 将子表更新记录拆分开来分别 patch 更新
+ * 
+ * - primaryKey: The primary key of main table
+ * - keys: The keys of main table
+ * - navigations: `to_BillOfMaterialItem:MaterialBOMItem:BillOfMaterial,BillOfMaterialCategory,BillOfMaterialVariant,BillOfMaterialVersion,BillOfMaterialItemNodeNumber,HeaderChangeDocument,Material,Plant;`
+ */
+function iteratingPatch(message) {
+  //Headers
+  var headers = message.getHeaders();
+  let body = message.getBody(java.lang.String);
+  //Properties
+  var properties = message.getProperties();
+  var reqHttpMethod = headers.get("CamelHttpMethod");
+  if (reqHttpMethod == 'POST' && body) {
+    var navigations = properties.get("navigations");
+    var primaryKey = properties.get("primaryKey");
+    var keys = properties.get("keys");
+    body = JSON.parse(body);
+    
+    if (body[primaryKey]) {
+      const items = [];
+      navigations = navigations.split(';');
+      navigations.map((navigation) => {
+        const [name, entitySet, keys] = navigation.split(':')
+        return {
+          name,
+          entitySet,
+          keys
+        }
+      }).forEach(({name, entitySet, keys}) => {
+        var _items = Array.isArray(body[name]) ? body[name] : body[name].results
+        if (_items) {
+          _items.forEach((item) => {
+            items.push({
+              path: entitySet,
+              keys,
+              body: item,
+              header: body
+            })
+          })
+        }
+
+        delete body[name]
+      })
+
+      items.push({
+        path: headers.get("CamelHttpPath"),
+        primaryKey,
+        keys,
+        body
+      })
+  
+      message.setBody(items.map((item) => JSON.stringify(item)).join('\n'));
+      headers.put("CamelHttpMethod", 'PATCH');
+    }
+  }
+
+  return message
+}
+
+/**
+ * Set parameters and body for iterating Patch
+ */
+function afterIteratingPatch(message) {
+  //Headers
+  var headers = message.getHeaders();
+  //Properties
+  var properties = message.getProperties();
+  let body = message.getBody(java.lang.String);
+  if (body) {
+    body = JSON.parse(body);
+    headers.put("CamelHttpPath", body.path + getKeyParameters(body.primaryKey, body.keys, body.body, body.header));
+    headers.put("CamelHttpMethod", 'PATCH');
+
+    message.setBody(JSON.stringify(body.body));
+  }
+
+  return message
+}
+
+/**
+ * Combine the key values to parameters of the url
+ */
+function getKeyParameters(primaryKey, keys, body, header) {
+  if (keys) {
+    keys = keys.split(',');
+    return `(` + keys.map((key) => {
+      key = key.trim();
+      let value = body[key]
+      if (value == undefined) {
+        value = header ? header[key] : undefined
+      }
+      return `${key}='${value || ''}'`
+    }).join(',') + `)`;
+  } else if (primaryKey) {
+    return `('${body[primaryKey]}')`;
+  }
+  return '';
 }
