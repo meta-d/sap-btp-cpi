@@ -18,7 +18,7 @@ function processData(message) {
     if (reqHttpMethod == 'GET') {
         // Use URLSearchParams to parse the query string
         const params = parseQueryString(queryString);
-        var startDate = params.CreationDate
+        var startDate = params.LastChangeDate
 
         const messageLog= messageLogFactory.getMessageLog(message);
         if (messageLog != null) {
@@ -26,7 +26,7 @@ function processData(message) {
             messageLog.addAttachmentAsString("Request Query Params", startDate, "text/plain");
         }
         
-        headers.put("CamelHttpQuery", `$filter=${encodeURIComponent(`CreationDate ge datetime'${startDate}'`)}`);
+        headers.put("CamelHttpQuery", `$filter=${encodeURIComponent(`LastChangeDateTime ge datetimeoffset'${startDate}' and ReleaseIsNotCompleted eq false and (PurchasingProcessingStatus eq '03' or PurchasingProcessingStatus eq '05' or PurchasingProcessingStatus eq '08')`)}`);
     }
 
     return message;

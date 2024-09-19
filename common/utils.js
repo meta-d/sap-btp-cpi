@@ -303,6 +303,7 @@ function iteratingPatch(message) {
     var navigations = properties.get("navigations");
     var primaryKey = properties.get("primaryKey");
     var keys = properties.get("keys");
+    var patchHeader = properties.get("patchHeader");
     body = JSON.parse(body);
     
     if (body[primaryKey]) {
@@ -331,12 +332,14 @@ function iteratingPatch(message) {
         delete body[name]
       })
 
-      items.push({
-        path: headers.get("CamelHttpPath"),
-        primaryKey,
-        keys,
-        body
-      })
+      if (patchHeader) {
+        items.push({
+          path: headers.get("CamelHttpPath"),
+          primaryKey,
+          keys,
+          body
+        })
+      }
   
       message.setBody(items.map((item) => JSON.stringify(item)).join('\n'));
       headers.put("CamelHttpMethod", 'PATCH');
