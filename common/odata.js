@@ -218,7 +218,9 @@ function processData(message) {
                 // 处理或打印响应
                 message.setBody(responseString);
                 
-                messageLog.addAttachmentAsString("Response PATCH Body", responseString, "text/plain");
+                messageLog.addAttachmentAsString("Response PATCH Error", odataServicePath + reqHttpPath + '\n' + body + '\n' + responseString, "text/plain");
+            } else {
+                messageLog.addAttachmentAsString("Response PATCH Body", odataServicePath + reqHttpPath + '\n' + body, "text/plain");
             }
 
             // Get the status code from the response

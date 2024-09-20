@@ -60,6 +60,45 @@ function dateToTimestamp(message) {
   return message;
 }
 
+function omitBodyNavigation(message) {
+  var body = message.getBody(java.lang.String);
+  
+  //Headers
+  var headers = message.getHeaders();
+  var reqHttpMethod = headers.get("CamelHttpMethod");
+
+  if ((reqHttpMethod == 'PATCH' || reqHttpMethod == 'POST') && body) {
+    message.setBody(JSON.stringify(omitNavigation(JSON.parse(body))))
+  }
+  
+  return message;
+}
+
+/**
+ * - primaryKey:
+ * - keys:
+ */
+function isPatchMethod(message) {
+  var body = message.getBody(java.lang.String);
+  
+  //Headers
+  var headers = message.getHeaders();
+  var reqHttpMethod = headers.get("CamelHttpMethod");
+
+  //Properties
+  var properties = message.getProperties();
+
+  if (reqHttpMethod == 'POST' && body) {
+    var key = properties.get("primaryKey");
+    body = JSON.parse(body)
+    if (body[key]) {
+      headers.put("CamelHttpMethod", 'PATCH');
+    }
+  }
+  
+  return message;
+}
+
 /**
  * - primaryKey:
  * - keys:
@@ -75,7 +114,7 @@ function toPatchMethod(message) {
   //Properties
   var properties = message.getProperties();
 
-  if (reqHttpMethod == 'POST' && body) {
+  if ((reqHttpMethod == 'PATCH' || reqHttpMethod == 'POST') && body) {
     var key = properties.get("primaryKey");
     var keys = properties.get("keys");
     body = JSON.parse(body)
@@ -309,27 +348,26 @@ function iteratingPatch(message) {
     if (body[primaryKey]) {
       const items = [];
       navigations = navigations.split(';');
-      navigations.map((navigation) => {
+      navigations = navigations.map((navigation) => {
         const [name, entitySet, keys] = navigation.split(':')
         return {
-          name,
+          names: name.split('__'),
           entitySet,
           keys
         }
-      }).forEach(({name, entitySet, keys}) => {
-        var _items = Array.isArray(body[name]) ? body[name] : body[name].results
-        if (_items) {
-          _items.forEach((item) => {
-            items.push({
-              path: entitySet,
-              keys,
-              body: item,
-              header: body
-            })
-          })
-        }
+      })
+      navigations.forEach(({names, entitySet, keys}) => {
+        let _items = [];
+        getSubEntity(body, names, keys.split(','), {}, _items);
+        _items.forEach((item) => {
+          item.path = entitySet;
+          items.push(item);
+        })
+      })
 
-        delete body[name]
+      // Clear navigations from the body
+      navigations.forEach(({names}) => {
+        delete body[names[0]];
       })
 
       if (patchHeader) {
@@ -337,7 +375,8 @@ function iteratingPatch(message) {
           path: headers.get("CamelHttpPath"),
           primaryKey,
           keys,
-          body
+          body,
+          parameters: formatParameters(body, keys ? keys.split(',') : null, primaryKey)
         })
       }
   
@@ -347,6 +386,48 @@ function iteratingPatch(message) {
   }
 
   return message
+}
+
+/**
+ * 递归获取子元素数据和其主键
+ * 
+ * @param {*} body 
+ * @param {*} paths 
+ * @param {*} keys 
+ * @param {*} parameters
+ * @param {*} values 
+ */
+function getSubEntity(body, paths, keys, parameters, values) {
+  let name = paths[0];
+  let items = [];
+  if (Array.isArray(body[name])) {
+    items = body[name]
+  } else if (Array.isArray(body[name].results)) {
+    items = body[name].results
+  } else if (body[name]) {
+    items = [body[name]]
+  }
+
+  for (let j = 0; j < items.length; j++) {
+    let item = items[j];
+
+    // Get primary key
+    keys.forEach((key) => {
+      if (item[key] != undefined) {
+        parameters[key] = item[key];
+      }
+    })
+
+    if (paths.length === 1) {
+      values.push({
+        keys,
+        body: omitObjectAttrs(item),
+        parameters: formatParameters(parameters, keys, null)
+      })
+    } else {
+      getSubEntity(item, paths.slice(1), keys, parameters, values)
+    }
+  }
 }
 
 /**
@@ -360,7 +441,7 @@ function afterIteratingPatch(message) {
   let body = message.getBody(java.lang.String);
   if (body) {
     body = JSON.parse(body);
-    headers.put("CamelHttpPath", body.path + getKeyParameters(body.primaryKey, body.keys, body.body, body.header));
+    headers.put("CamelHttpPath", body.path + body.parameters);
     headers.put("CamelHttpMethod", 'PATCH');
 
     message.setBody(JSON.stringify(body.body));
@@ -369,22 +450,44 @@ function afterIteratingPatch(message) {
   return message
 }
 
-/**
- * Combine the key values to parameters of the url
- */
-function getKeyParameters(primaryKey, keys, body, header) {
+function formatParameters(parameters, keys, primaryKey) {
   if (keys) {
-    keys = keys.split(',');
+    // keys = keys.split(',');
     return `(` + keys.map((key) => {
       key = key.trim();
-      let value = body[key]
-      if (value == undefined) {
-        value = header ? header[key] : undefined
-      }
+      let value = parameters[key];
       return `${key}='${value || ''}'`
     }).join(',') + `)`;
   } else if (primaryKey) {
-    return `('${body[primaryKey]}')`;
+    return `('${parameters[primaryKey]}')`;
   }
   return '';
+}
+
+function omitObjectAttrs(item) {
+  // Omit object attributes from JSON object
+  let newObject = {}
+  for (let key in item) {
+     let value = item[key];
+     if (value && typeof value == 'object') {
+      continue;
+    }
+    newObject[key] = value;
+  }
+
+  return newObject;
+}
+
+function omitNavigation(item) {
+  // Omit object attributes from JSON object
+  let newObject = {}
+  for (let key in item) {
+     let value = item[key];
+     if (key.startsWith('to_')) {
+      continue;
+    }
+    newObject[key] = value;
+  }
+
+  return newObject;
 }
