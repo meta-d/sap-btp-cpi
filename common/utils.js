@@ -118,19 +118,29 @@ function toPatchMethod(message) {
     var key = properties.get("primaryKey");
     var keys = properties.get("keys");
     body = JSON.parse(body)
-    if (body[key]) {
+    if (!isNotEmptyString(key) || body[key]) {
       if (keys) {
         keys = keys.split(',');
         reqHttpPath = reqHttpPath + `(` + keys.map((key) => {
           key = key.trim();
           return `${key}='${body[key] || ''}'`
         }).join(',') + `)`;
-      } else {
+
+        // Remove keys from body
+        keys.forEach((key) => {
+          delete body[key];
+        })
+        message.setBody(JSON.stringify(body));
+
+        // Set new headers
+        headers.put("CamelHttpPath", reqHttpPath);
+        headers.put("CamelHttpMethod", 'PATCH');
+      } else if (isNotEmptyString(key)) {
         reqHttpPath = reqHttpPath + `('${body[key]}')`;
+
+        headers.put("CamelHttpPath", reqHttpPath);
+        headers.put("CamelHttpMethod", 'PATCH');
       }
-      
-      headers.put("CamelHttpPath", reqHttpPath);
-      headers.put("CamelHttpMethod", 'PATCH');
     }
   }
   
@@ -238,7 +248,7 @@ function setNestedProperty(obj, keys, value) {
 
 function isValidDate(dateStr) {
   // 正则表达式检测日期格式 YYYY-MM-DD
-  var dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  var dateRegex = /^\d{4}-\d{2}-\d{2}/;
   return dateRegex.test(dateStr);
 }
 
@@ -296,17 +306,26 @@ function processCreateNavigation(message) {
   }
   //Body
   var body = JSON.parse(message.getBody(java.lang.String));
-  body = Object.keys(body).reduce((acc, key) => {
-      const value = body[key]
+  body = restoreNavigation(body);
+
+  // 将处理后的 JSON 对象转换回字符串并写回消息体
+  message.setBody(JSON.stringify(body));
+      
+  return message
+}
+
+function restoreNavigation(obj) {
+  return Object.keys(obj).reduce((acc, key) => {
+    const value = obj[key]
       if (key.startsWith('to_')) {
-          if (Array.isArray(body[key])) {
+          if (Array.isArray(value)) {
               acc[key] = {
-                  results: value
+                  results: value.map(restoreNavigation)
               }
           } else if (key.endsWith('_n')) {
               key = key.split('_n')[0]
               acc[key] = {
-                  results: [value]
+                  results: [restoreNavigation(value)]
               }
           } else {
               acc[key] = value;
@@ -317,11 +336,6 @@ function processCreateNavigation(message) {
       
       return acc
   }, {})
-
-  // 将处理后的 JSON 对象转换回字符串并写回消息体
-  message.setBody(JSON.stringify(body));
-      
-  return message
 }
 
 /**
@@ -351,7 +365,7 @@ function iteratingPatch(message) {
       navigations = navigations.map((navigation) => {
         const [name, entitySet, keys] = navigation.split(':')
         return {
-          names: name.split('__'),
+          names: name.split('__').map((item) => item.trim()),
           entitySet,
           keys
         }
@@ -400,6 +414,10 @@ function iteratingPatch(message) {
 function getSubEntity(body, paths, keys, parameters, values) {
   let name = paths[0];
   let items = [];
+  // 对于配置的路径没有相应的值则直接返回，因为存在同一个接口用于不同的用途，所以以实际值为准
+  if (!body[name]) {
+    return
+  }
   if (Array.isArray(body[name])) {
     items = body[name]
   } else if (Array.isArray(body[name].results)) {
@@ -455,8 +473,8 @@ function formatParameters(parameters, keys, primaryKey) {
     // keys = keys.split(',');
     return `(` + keys.map((key) => {
       key = key.trim();
-      let value = parameters[key];
-      return `${key}='${value || ''}'`
+      let value = timestampToDatetimeParam(parameters[key]);
+      return `${key}=${value || `''`}`
     }).join(',') + `)`;
   } else if (primaryKey) {
     return `('${parameters[primaryKey]}')`;
@@ -490,4 +508,47 @@ function omitNavigation(item) {
   }
 
   return newObject;
+}
+
+function saveOriginBody(message) {
+  let body = message.getBody(java.lang.String);
+  
+  if (isNotEmptyString(body)) {
+    message.setProperty("OriginBody", body);
+  }
+
+  return message;
+}
+
+function restoreOriginBody(message) {
+  let body = message.getProperties().get("OriginBody")
+  
+  if (isNotEmptyString(body)) {
+    message.setBody(body);
+  }
+
+  return message;
+}
+
+function timestampToDatetimeParam(odataDate) {
+  let zone = 0;
+  // 正则匹配 "/Date(数字)/" 格式
+  var match = odataDate && odataDate.match(/\/Date\((\d+)([+-]\d+)?\)\//);
+  if (match) {
+      var timestamp = parseInt(match[1], 10);  // 提取时间戳
+      var date = new Date(timestamp + zone * 60 * 60 * 1000);  // 转换为日期对象 e.g. UTC+8
+
+      // 格式化为 yyyy-MM-dd
+      var year = date.getUTCFullYear();
+      var month = ('0' + (date.getUTCMonth() + 1)).slice(-2);  // 月份从0开始
+      var day = ('0' + date.getUTCDate()).slice(-2);
+
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+
+      return `datetime'${year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds}'`
+  }
+
+  return odataDate ? `'${odataDate}'` : null;
 }

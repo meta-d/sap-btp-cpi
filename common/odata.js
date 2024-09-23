@@ -53,6 +53,7 @@ function processData(message) {
     var HttpGet = Packages.org.apache.http.client.methods.HttpGet;
     var HttpPost = Packages.org.apache.http.client.methods.HttpPost;
     var HttpPatch = Packages.org.apache.http.client.methods.HttpPatch;
+    var HttpDelete = Packages.org.apache.http.client.methods.HttpDelete;
     var IOUtils = Packages.org.apache.commons.io.IOUtils;
     var Base64 = Packages.java.util.Base64;
     var URI = Packages.java.net.URI;
@@ -116,7 +117,7 @@ function processData(message) {
         }
     }
     
-    if (reqHttpMethod == 'POST' || reqHttpMethod == 'PUT' || reqHttpMethod == 'PATCH') {
+    if (reqHttpMethod == 'POST' || reqHttpMethod == 'PUT' || reqHttpMethod == 'PATCH' || reqHttpMethod == 'DELETE') {
         if (reqHttpMethod == 'POST') {
             // Fetch token
             var httpGet = new HttpGet(odataUrl + odataServicePath );
@@ -168,7 +169,7 @@ function processData(message) {
                 
                 messageLog.addAttachmentAsString("Response POST Body", responseString, "text/plain");
             }
-        } else if (reqHttpMethod == 'PATCH') {
+        } else if (reqHttpMethod == 'PATCH' || reqHttpMethod == 'DELETE') {
             // Get etag
             var httpGet = new HttpGet(odataUrl + odataServicePath + reqHttpPath);
             httpGet.setHeader("Authorization", authHeader);
@@ -187,27 +188,53 @@ function processData(message) {
                 message.setProperty("etag", etag);
             }
 
-            // Create Entity
-            var httpPatch = new HttpPatch(odataUrl + odataServicePath + reqHttpPath);
-            // 设置 Basic Authentication 头
-            httpPatch.setHeader("Authorization", authHeader);
-            if (csrfToken) {
-                httpPatch.setHeader("X-CSRF-Token", csrfToken);
-            }
-            if (etag) {
-                httpPatch.setHeader("If-Match", etag);
-            }
+            var response = null;
+            var entity = null;
+            if (reqHttpMethod == 'PATCH') {
+                // Patch Entity
+                var httpPatch = new HttpPatch(odataUrl + odataServicePath + reqHttpPath);
+                // 设置 Basic Authentication 头
+                httpPatch.setHeader("Authorization", authHeader);
+                if (csrfToken) {
+                    httpPatch.setHeader("X-CSRF-Token", csrfToken);
+                }
+                if (etag) {
+                    httpPatch.setHeader("If-Match", etag);
+                }
 
-            // Set the request entity (body)
-            httpPatch.setEntity(new StringEntity(body, "UTF-8"));
-            
-            // Set headers (for example, Content-Type and Authorization)
-            httpPatch.setHeader("Content-Type", "application/json");
-            httpPatch.setHeader("Accept", "application/json");
-            
-            // 发送请求并获取响应
-            var response = client.execute(httpPatch);
-            var entity = response.getEntity();
+                // Set the request entity (body)
+                httpPatch.setEntity(new StringEntity(body, "UTF-8"));
+                
+                // Set headers (for example, Content-Type and Authorization)
+                httpPatch.setHeader("Content-Type", "application/json");
+                httpPatch.setHeader("Accept", "application/json");
+                
+                // 发送请求并获取响应
+                response = client.execute(httpPatch);
+                entity = response.getEntity();
+            } else if (reqHttpMethod == 'DELETE') {
+                // Delete Entity
+                var httpDelete = new HttpDelete(odataUrl + odataServicePath + reqHttpPath);
+                // 设置 Basic Authentication 头
+                httpDelete.setHeader("Authorization", authHeader);
+                if (csrfToken) {
+                    httpDelete.setHeader("X-CSRF-Token", csrfToken);
+                }
+                if (etag) {
+                    httpDelete.setHeader("If-Match", etag);
+                }
+
+                // Set the request entity (body)
+                // httpPatch.setEntity(new StringEntity(body, "UTF-8"));
+
+                // Set headers (for example, Content-Type and Authorization)
+                httpDelete.setHeader("Content-Type", "application/json");
+                httpDelete.setHeader("Accept", "application/json");
+
+                // 发送请求并获取响应
+                response = client.execute(httpDelete);
+                entity = response.getEntity();
+            }
             
             // 读取响应内容
             if (entity !== null) {
