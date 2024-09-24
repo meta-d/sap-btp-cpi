@@ -18,3 +18,24 @@ function patchSupplierOrCustomer(message) {
 
   return message;
 }
+
+function extractAddressID(message) {
+  //Headers
+  var headers = message.getHeaders();
+  var reqHttpMethod = headers.get("CamelHttpMethod");
+
+  if (reqHttpMethod == 'POST') {
+    var body = message.getBody(java.lang.String);
+    var jsonBody = JSON.parse(body);
+
+    if (jsonBody.d && jsonBody.d.to_BusinessPartnerAddress &&
+      jsonBody.d.to_BusinessPartnerAddress.results &&
+      jsonBody.d.to_BusinessPartnerAddress.results[0]
+    ) {
+      jsonBody.d.AddressID = jsonBody.d.to_BusinessPartnerAddress.results[0].AddressID;
+      message.setBody(JSON.stringify(jsonBody));
+    }
+  }
+
+  return message;
+}

@@ -24,6 +24,9 @@ function forSplitItems(message) {
   
     if (isNotEmptyString(body)) {
       body = JSON.parse(body);
+      if (!body.d) {
+        throw new Error(`找不到相关数据`)
+      }
       message.setBody(body.d.results.map((item) => JSON.stringify(item)).join('\n'));
     }
   
@@ -58,7 +61,8 @@ function forCreateItem(message) {
 
       message.setBody(body.to_BillOfMaterialItem.results.map((item) => JSON.stringify(item)).join('\n'));
       
-      headers.put("CamelHttpPath", `MaterialBOMItem`);
+      // headers.put("CamelHttpPath", `MaterialBOMItem`);
+      headers.put("CamelHttpPath", `MaterialBOM(BillOfMaterial='${body.BillOfMaterial || ''}',BillOfMaterialCategory='${body.BillOfMaterialCategory || ''}',BillOfMaterialVariant='${body.BillOfMaterialVariant || ''}',BillOfMaterialVersion='${body.BillOfMaterialVersion || ''}',EngineeringChangeDocument='${body.EngineeringChangeDocument || ''}',Material='${body.Material || ''}',Plant='${body.Plant || ''}')/to_BillOfMaterialItem`);
       headers.put("CamelHttpQuery", '');
       headers.put("CamelHttpMethod", "POST");
     }

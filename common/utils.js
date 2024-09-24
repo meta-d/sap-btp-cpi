@@ -352,7 +352,7 @@ function iteratingPatch(message) {
   //Properties
   var properties = message.getProperties();
   var reqHttpMethod = headers.get("CamelHttpMethod");
-  if (reqHttpMethod == 'POST' && body) {
+  if ((reqHttpMethod == 'PATCH' || reqHttpMethod == 'POST') && body) {
     var navigations = properties.get("navigations");
     var primaryKey = properties.get("primaryKey");
     var keys = properties.get("keys");
@@ -363,16 +363,30 @@ function iteratingPatch(message) {
       const items = [];
       navigations = navigations.split(';');
       navigations = navigations.map((navigation) => {
-        const [name, entitySet, keys] = navigation.split(':')
+        const [name, entitySet, keys] = navigation.split(':');
+        // 支持 __ 或 / 两种 Entity 分隔符
+        var names = name.split('__');
+        if (names.length === 1) {
+          names = name.split('/');
+        }
         return {
-          names: name.split('__').map((item) => item.trim()),
+          names: names.map((item) => item.trim()),
           entitySet,
           keys
         }
       })
       navigations.forEach(({names, entitySet, keys}) => {
         let _items = [];
-        getSubEntity(body, names, keys.split(','), {}, _items);
+        keys = keys.split(',').map((key) => key.trim());
+        getSubEntity(body, names, keys,
+          // Init parameters in body
+          keys.reduce((acc, key) => {
+            if (body[key] != undefined) {
+              acc[key] = body[key];
+            }
+            return acc;
+          }, {}),
+          _items);
         _items.forEach((item) => {
           item.path = entitySet;
           items.push(item);
