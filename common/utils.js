@@ -100,6 +100,7 @@ function isPatchMethod(message) {
 }
 
 /**
+ * 此函数
  * - primaryKey:
  * - keys:
  */
@@ -144,6 +145,46 @@ function toPatchMethod(message) {
     }
   }
   
+  return message;
+}
+
+/**
+ * 为 PATCH 方法根据 primaryKey 或 keys 从 body 中获取主键值去更新 CamelHttpPath
+ */
+function updateHttpPathForPatch(message) {
+  //Headers
+  var headers = message.getHeaders();
+  //Properties
+  var properties = message.getProperties();
+  
+  var reqHttpMethod = headers.get("CamelHttpMethod");
+  var reqHttpPath = headers.get("CamelHttpPath");
+
+  var body = message.getBody(java.lang.String);
+  if (reqHttpMethod == 'PATCH' && isNotEmptyString(body)) {
+    var key = properties.get("primaryKey");
+    var keys = properties.get("keys");
+    body = JSON.parse(body)
+    if (keys) {
+      keys = keys.split(',');
+      reqHttpPath = reqHttpPath + `(` + keys.map((key) => {
+        key = key.trim();
+        return `${key}='${body[key] || ''}'`
+      }).join(',') + `)`;
+
+      // Remove keys from body
+      keys.forEach((key) => {
+        delete body[key];
+      })
+      message.setBody(JSON.stringify(body));
+
+      // Set new headers
+      headers.put("CamelHttpPath", reqHttpPath);
+    } else if (isNotEmptyString(key)) {
+      reqHttpPath = reqHttpPath + `('${body[key]}')`;
+      headers.put("CamelHttpPath", reqHttpPath);
+    }
+  }
   return message;
 }
 
@@ -565,4 +606,36 @@ function timestampToDatetimeParam(odataDate) {
   }
 
   return odataDate ? `'${odataDate}'` : null;
+}
+
+/**
+ * 对于外部给号的接口，通过 "UpdateFlag" 字段的 0/1 来区分当前操作是新增还是修改。
+ * - 如果没有收到 "UpdateFlag" 字段，则以 PrimaryKey 来判断；
+ * - 此函数只修改 Message header `CamelHttpMethod`；
+ */
+function updateFlag(message) {
+  //Headers
+  var headers = message.getHeaders();
+  let body = message.getBody(java.lang.String);
+
+  if (body) {
+    body = JSON.parse(body);
+
+    var properties = message.getProperties();
+    var primaryKey = properties.get("primaryKey");
+
+    if (body.UpdateFlag == "1") {
+      headers.put("CamelHttpMethod", "PATCH");
+    } else if (body.UpdateFlag == "0") {
+      headers.put("CamelHttpMethod", "POST");
+    } else if (primaryKey) {
+      if (body[primaryKey]) {
+        headers.put("CamelHttpMethod", "PATCH");
+      }
+    }
+    delete body["UpdateFlag"];
+    message.setBody(JSON.stringify(body));
+  }
+
+  return message;
 }

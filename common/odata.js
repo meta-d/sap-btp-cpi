@@ -7,6 +7,7 @@ importClass(com.sap.gateway.ip.core.customdev.util.Message);
 importClass(java.util.HashMap);
 importClass(com.sap.it.api.ITApiFactory);
 importClass(com.sap.it.api.securestore.SecureStoreService);
+importClass(java.lang.Exception);
 
 
 /**
@@ -151,17 +152,18 @@ function processData(message) {
             // 发送请求并获取响应
             var response = client.execute(httpPost);
             var entity = response.getEntity();
+
+            // Get the status code from the response
+            var statusCode = response.getStatusLine().getStatusCode();
+            // Set the status code in the message headers
+            message.setHeader("CamelHttpResponseCode", statusCode);
             
             // 读取响应内容
             if (entity !== null) {
                 var inputStream = entity.getContent();
                 var responseString = IOUtils.toString(inputStream, "UTF-8");
                 inputStream.close();
-            
-                // Get the status code from the response
-                var statusCode = response.getStatusLine().getStatusCode();
-                // Set the status code in the message headers
-                message.setHeader("CamelHttpResponseCode", statusCode);
+  
                 // 处理或打印响应
                 message.setBody(responseString);
                 // 设置响应头的 Content-Type 为 application/json
@@ -175,9 +177,35 @@ function processData(message) {
             httpGet.setHeader("Authorization", authHeader);
             // 添加获取 CSRF Token 所需的 Header
             httpGet.setHeader("X-CSRF-Token", "Fetch");
+            httpGet.setHeader("Accept", "application/json");
             // 发送 GET 请求以获取 CSRF Token
             var response = client.execute(httpGet);
             var entity = response.getEntity();
+
+            var statusCode = response.getStatusLine().getStatusCode();
+            // 检查状态码
+            if (statusCode >= 400) { // 检查是否为错误状态
+                // Set the status code in the message headers
+                message.setHeader("CamelHttpResponseCode", statusCode);
+                // 设置响应头的 Content-Type 为 application/json
+                message.setHeader("Content-Type", "application/json");
+
+                if (entity != null) {
+                    var inputStream = entity.getContent();
+                    var responseString = IOUtils.toString(inputStream, "UTF-8");
+                    inputStream.close();
+            
+                    // 处理或打印响应
+                    message.setBody(responseString);
+                    
+                    messageLog.addAttachmentAsString("Get Entity Error", odataServicePath + reqHttpPath + '\n' + body + '\n' + responseString, "text/plain");
+                } 
+
+                 // 关闭 HttpClient
+                client.close();
+                return message;
+            }
+            
             // 从响应头中获取 CSRF Token
             var csrfToken = response.getFirstHeader("X-CSRF-Token").getValue();
             // 打印或存储 CSRF Token，用于后续 POST 请求
@@ -224,9 +252,6 @@ function processData(message) {
                     httpDelete.setHeader("If-Match", etag);
                 }
 
-                // Set the request entity (body)
-                // httpPatch.setEntity(new StringEntity(body, "UTF-8"));
-
                 // Set headers (for example, Content-Type and Authorization)
                 httpDelete.setHeader("Content-Type", "application/json");
                 httpDelete.setHeader("Accept", "application/json");
@@ -235,6 +260,9 @@ function processData(message) {
                 response = client.execute(httpDelete);
                 entity = response.getEntity();
             }
+
+            // Get the status code from the response
+            var statusCode = response.getStatusLine().getStatusCode();
             
             // 读取响应内容
             if (entity !== null) {
@@ -245,13 +273,11 @@ function processData(message) {
                 // 处理或打印响应
                 message.setBody(responseString);
                 
-                messageLog.addAttachmentAsString("Response PATCH Error", odataServicePath + reqHttpPath + '\n' + body + '\n' + responseString, "text/plain");
+                messageLog.addAttachmentAsString("Response PATCH Error", odataServicePath + reqHttpPath + '\n' + body + '\n' + responseString + '\n' + statusCode, "text/plain");
             } else {
                 messageLog.addAttachmentAsString("Response PATCH Body", odataServicePath + reqHttpPath + '\n' + body, "text/plain");
             }
 
-            // Get the status code from the response
-            var statusCode = response.getStatusLine().getStatusCode();
             // Set the status code in the message headers
             message.setHeader("CamelHttpResponseCode", statusCode);
             // 设置响应头的 Content-Type 为 application/json
@@ -377,4 +403,21 @@ function getBasicCredential(name, message) {
     } else {
         throw new Error(`Not Credential for ` + name)
     }
+}
+
+/**
+ * Throw a exception when the response status code >= 400, to break the route
+ */
+function throwHttpError(message) {
+    //Headers
+    var headers = message.getHeaders();
+    var statusCode = headers.get("CamelHttpResponseCode");
+    if (statusCode >= 400) {
+        //Body
+        var body = message.getBody(java.lang.String);
+
+        throw new Error(body || statusCode)
+    }
+
+    return message
 }
